@@ -17,6 +17,8 @@ reliable, conflict-free schedule to manage.
 ## Tech Stack
 
 - **Language / Framework:** Python, Django, Django REST Framework
+- **Auth:** JWT (djangorestframework-simplejwt)
+- **API Docs:** drf-spectacular (Swagger / Redoc)
 - **Database:** PostgreSQL
 - **Planned (later phases):** Celery, Redis, Docker, GitHub Actions CI
 
@@ -50,6 +52,35 @@ USER (id, email, password, role)
 - `Appointment.clean()` prevents overlapping bookings for the same doctor by checking
   for any time-range intersection against existing `pending`/`confirmed` appointments.
 
+## API Overview (Phase 3)
+
+Base URL: `/api/`
+
+| Endpoint | Method | Access |
+|---|---|---|
+| `/api/token/` | POST | Public — obtain JWT access/refresh tokens |
+| `/api/token/refresh/` | POST | Public — refresh an access token |
+| `/api/users/` | GET/POST/... | Admin only |
+| `/api/doctors/` | GET/POST/... | Public read, doctor/admin write |
+| `/api/doctors/{id}/available-slots/` | GET | Public — returns open time slots for a doctor on a given date |
+| `/api/patients/` | GET/POST/... | Authenticated, scoped to own profile |
+| `/api/availabilities/` | GET/POST/... | Public read, doctor-only write |
+| `/api/services/` | GET/POST/... | Public read, doctor-only write |
+| `/api/appointments/` | GET/POST/... | Authenticated, scoped to own bookings |
+| `/api/docs/` | GET | Swagger UI — interactive API docs |
+
+**Key engineering decisions:**
+- Role-based permissions (`patient` / `doctor` / `admin`) enforced via custom DRF
+  permission classes, not just serializer-level checks.
+- `get_queryset()` overrides scope list results per user (a patient never sees another
+  patient's appointments), separate from object-level permission checks.
+- The `available-slots` endpoint computes real free time by subtracting existing
+  appointments from a doctor's declared `Availability`, rather than exposing raw
+  availability and leaving conflict-checking to the client.
+- A conflict re-check runs in `perform_create()` immediately before saving a new
+  appointment, as a first line of defense against double-booking (hardened further in
+  Phase 4 with `select_for_update()`).
+
 ## Project Status
 
 ### ✅ Phase 1 — Planning & Data Modeling
@@ -65,8 +96,19 @@ USER (id, email, password, role)
 - All models registered and manageable in Django admin
 - Basic double-booking validation implemented via `Appointment.clean()`
 
-### 🔜 Phase 3 — REST API (in progress)
-- Serializers, viewsets, JWT authentication, permissions, booking endpoints, Swagger docs
+### ✅ Phase 3 — REST API
+- Serializers for all six models, with cross-field validation (e.g. `start_time` <
+  `end_time`) and reuse of the model-level overlap check
+- Full CRUD via DRF `ModelViewSet`s, wired through a `DefaultRouter`
+- JWT authentication (login + refresh) via `djangorestframework-simplejwt`
+- Custom role-based permission classes (`IsDoctorOrReadOnly`,
+  `IsOwnerPatientOrDoctorReadOnly`, `IsAdminRole`)
+- Per-user queryset scoping so patients/doctors only ever see their own data
+- `available-slots` endpoint: computes real open time slots for a doctor on a given
+  date, accounting for existing bookings
+- Conflict re-check on appointment creation as a first line of defense against
+  double-booking
+- Live Swagger/OpenAPI docs via `drf-spectacular` at `/api/docs/`
 
 ### Upcoming
 - Phase 4: Concurrency-safe booking (`select_for_update`), business rules
@@ -107,7 +149,8 @@ USER (id, email, password, role)
    python manage.py runserver
    ```
 
-7. Visit `http://127.0.0.1:8000/admin/` to manage data.
+7. Visit `http://127.0.0.1:8000/admin/` to manage data, or
+   `http://127.0.0.1:8000/api/docs/` to explore and test the API.
 
 ## Environment Variables
 
