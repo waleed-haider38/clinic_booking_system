@@ -35,6 +35,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework_simplejwt',
     'drf_spectacular',
+    'django.contrib.postgres',
     'clinic',
     'django.contrib.admin',
     'django.contrib.auth',

@@ -1,7 +1,14 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.core.exceptions import ValidationError
+from django.contrib.postgres.constraints import ExclusionConstraint
+from django.contrib.postgres.fields import DateTimeRangeField, RangeOperators
+from django.db.models import Q
+from django.db.models import Func
 
+class TsTzRange(Func):
+    function = 'TSTZRANGE'
+    output_field = DateTimeRangeField()
 # Create your models here.
 
 #Abstract User has already built in column. like name , email etc so we are saying that add a new attribute of name role init with choices.
@@ -63,6 +70,8 @@ class Service(models.Model):
     def __str__(self):
         return f"{self.name} ({self.duration_minutes} min) - {self.doctor.user.username}"
 
+
+
 class Appointment(models.Model):
     STATUS_CHOICES = (
         ('pending', 'Pending'),
@@ -92,3 +101,15 @@ class Appointment(models.Model):
 
         if overlapping.exists():
             raise ValidationError("This doctor already has an appointment during this time slot.")
+
+    class Meta:
+        constraints = [
+            ExclusionConstraint(
+                name="exclude_overlapping_appointments",
+                expressions=[
+                    (TsTzRange('start_time', 'end_time'), RangeOperators.OVERLAPS),
+                    ("doctor", RangeOperators.EQUAL),
+                ],
+                condition=Q(status__in=['pending', 'confirmed']),
+                ),
+            ]
