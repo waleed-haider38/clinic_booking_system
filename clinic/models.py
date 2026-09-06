@@ -6,9 +6,27 @@ from django.contrib.postgres.fields import DateTimeRangeField, RangeOperators
 from django.db.models import Q
 from django.db.models import Func
 
+
+# --- Double-booking prevention: Part 1 (DB-level safety net) ---
+#
+# Postgres's ExclusionConstraint needs a single "range" value to check
+# for overlaps (e.g. a DateTimeRangeField). Our Appointment model stores
+# time as two separate columns (start_time, end_time) instead of a native
+# range field, so we can't pass those columns directly into the constraint.
+#
+# This class is a small wrapper around Postgres's built-in TSTZRANGE()
+# function. It tells Django: "whenever this class is used inside a query,
+# generate the SQL function TSTZRANGE(start_time, end_time)" — which
+# combines our two columns into one range value on the fly, only for the
+# purpose of the constraint check. No new column is created in the table.
+#
+# We inherit from Func (Django's base class for SQL functions) instead of
+# writing our own __init__, because Func already knows how to accept
+# positional field names and turn them into SQL function arguments.
 class TsTzRange(Func):
-    function = 'TSTZRANGE'
-    output_field = DateTimeRangeField()
+    function = 'TSTZRANGE'  # the actual Postgres function name to call
+    output_field = DateTimeRangeField()  # tells Django the result is a "range" type,
+                                        # so it knows how to compare it with OVERLAPS
 # Create your models here.
 
 #Abstract User has already built in column. like name , email etc so we are saying that add a new attribute of name role init with choices.
@@ -90,8 +108,12 @@ class Appointment(models.Model):
         return f"{self.patient.user.username} with Dr. {self.doctor.user.username} on {self.start_time}"
 
     def clean(self):
-        # Basic overlap check: does this doctor already have an appointment
-        # that overlaps with this new one?
+        # Application-level overlap check, run whenever full_clean()/serializer
+        # validation calls it. This is NOT race-condition safe on its own —
+        # two simultaneous requests can both pass this check before either
+        # one saves. It's kept as a first line of defense (e.g. for Django
+        # admin, where the DB constraint below still applies but this gives
+        # a friendlier error message earlier).
         overlapping = Appointment.objects.filter(
             doctor=self.doctor,
             status__in=['pending', 'confirmed'],
@@ -104,6 +126,22 @@ class Appointment(models.Model):
 
     class Meta:
         constraints = [
+            # --- Double-booking prevention: Part 2 (the actual DB rule) ---
+            #
+            # This is the hard guarantee that Python-level checks (like
+            # clean() above) can't fully provide, because it's enforced by
+            # Postgres itself at insert/update time — even if two requests
+            # race past the application-level check, the database will
+            # reject the second conflicting row outright.
+            #
+            # It blocks any two rows where:
+            #   - the doctor is the SAME (RangeOperators.EQUAL on 'doctor')
+            #   - AND their time ranges OVERLAP (using our TsTzRange
+            #     wrapper to combine start_time/end_time into one range)
+            #
+            # The condition= clause scopes this rule to only pending/confirmed
+            # appointments — a cancelled or completed appointment should never
+            # block a new booking for that same slot.
             ExclusionConstraint(
                 name="exclude_overlapping_appointments",
                 expressions=[
