@@ -110,8 +110,13 @@ Base URL: `/api/`
   double-booking
 - Live Swagger/OpenAPI docs via `drf-spectacular` at `/api/docs/`
 
+  ### ✅ Phase 4 — Concurrency & Booking Integrity
+- Implemented `transaction.atomic()` with `select_for_update()` database row-level locking to prevent double-booking race conditions        under concurrent requests
+- Enforced minimum notice period (1 hour before start time) and cancellation window (2 hours before start time)
+- Enforced strict UTC timezone handling across all endpoints
+- Wrote concurrency tests confirming race-condition safety under simultaneous booking attempts
+
 ### Upcoming
-- Phase 4: Concurrency-safe booking (`select_for_update`), business rules
 - Phase 5: Async email/reminder notifications (Celery + Redis)
 - Phase 6: Automated tests, linting
 - Phase 7: Docker + CI/CD + deployment
