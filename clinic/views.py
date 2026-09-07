@@ -6,6 +6,7 @@ from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError
+from django.db import transaction
 
 from .models import User, DoctorProfile, PatientProfile, Availability, Service, Appointment
 from .serializers import (
@@ -138,20 +139,39 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         return Appointment.objects.filter(patient__user=user)
 
     def perform_create(self, serializer):
-        # force the appointment's patient to be the logged-in user — prevents booking on someone else's behalf
         patient_profile = PatientProfile.objects.get(user=self.request.user)
 
         doctor = serializer.validated_data['doctor']
         start_time = serializer.validated_data['start_time']
         end_time = serializer.validated_data['end_time']
 
-        conflict = Appointment.objects.filter(
-            doctor=doctor,
-            status__in=['pending', 'confirmed'],
-            start_time__lt=end_time,
-            end_time__gt=start_time,
-        ).exists()
-        if conflict:
-            raise ValidationError("This slot was just booked by someone else. Please pick another.")
+        with transaction.atomic():
+            # lock the doctor row first — this is what makes the whole
+            # check-then-create sequence safe from race conditions
+            DoctorProfile.objects.select_for_update().get(pk=doctor.pk)
 
-        serializer.save(patient=patient_profile)
+            conflict = Appointment.objects.filter(
+                doctor=doctor,
+                status__in=['pending', 'confirmed'],
+                start_time__lt=end_time,
+                end_time__gt=start_time,
+            ).exists()
+            if conflict:
+                raise ValidationError("This slot was just booked by someone else. Please pick another.")
+
+            serializer.save(patient=patient_profile)
+
+    @action(detail=True, methods=['post'])
+    def cancel(self , request , pk=None):
+        appoinment = self.get_object()
+        #finding current time
+        current_time = timezone.now()
+        #Checking appoinment cancelling time. It it is less than 2 hours appoinment will not be cancelled.
+        if appoinment.start_time - current_time < timedelta(hours=2):
+            raise ValidationError("We cannot move forward with this request")
+        #If appoinment already cancelled out then this error with gave up
+        if appointment.status in ['cancelled', 'completed']:
+            raise ValidationError("This appointment cannot be cancelled.")
+        appoinment.status = 'cancelled'
+        appoinment.save()
+        return Response({"status":"cancelled"})

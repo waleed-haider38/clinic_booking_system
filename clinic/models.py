@@ -5,6 +5,8 @@ from django.contrib.postgres.constraints import ExclusionConstraint
 from django.contrib.postgres.fields import DateTimeRangeField, RangeOperators
 from django.db.models import Q
 from django.db.models import Func
+from django.utils import timezone
+from datetime import timedelta
 
 
 # --- Double-booking prevention: Part 1 (DB-level safety net) ---
@@ -27,6 +29,8 @@ class TsTzRange(Func):
     function = 'TSTZRANGE'  # the actual Postgres function name to call
     output_field = DateTimeRangeField()  # tells Django the result is a "range" type,
                                         # so it knows how to compare it with OVERLAPS
+
+MINIMUM_NOTICE_HOURS = timedelta(hours=1)
 # Create your models here.
 
 #Abstract User has already built in column. like name , email etc so we are saying that add a new attribute of name role init with choices.
@@ -114,6 +118,7 @@ class Appointment(models.Model):
         # one saves. It's kept as a first line of defense (e.g. for Django
         # admin, where the DB constraint below still applies but this gives
         # a friendlier error message earlier).
+        
         overlapping = Appointment.objects.filter(
             doctor=self.doctor,
             status__in=['pending', 'confirmed'],
@@ -123,6 +128,16 @@ class Appointment(models.Model):
 
         if overlapping.exists():
             raise ValidationError("This doctor already has an appointment during this time slot.")
+
+        # Minimum notice period: a new appointment must start at least
+        # MINIMUM_NOTICE_HOURS from now — prevents last-minute bookings
+        # that a doctor/clinic can't realistically prepare for.
+       
+        current_time = timezone.now()
+        if self.start_time - current_time < MINIMUM_NOTICE_HOURS:
+            raise ValidationError("Appointments must be booked at least 1 hour in advance.")
+
+
 
     class Meta:
         constraints = [
