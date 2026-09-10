@@ -107,6 +107,7 @@ class Appointment(models.Model):
     start_time = models.DateTimeField()
     end_time = models.DateTimeField()
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
+    reminder_sent = models.BooleanField(default=False)
 
     def __str__(self):
         return f"{self.patient.user.username} with Dr. {self.doctor.user.username} on {self.start_time}"

@@ -58,7 +58,7 @@ class AppointmentSerializer(serializers.ModelSerializer):
             'patient_name', 'doctor_name',
             'start_time', 'end_time', 'status',
         ]
-        read_only_fields = ['status']  # status is set by booking logic / doctor / admin, not by the patient directly
+        read_only_fields = ['status','patient']  # status is set by booking logic / doctor / admin, not by the patient directly
 
     def validate(self, data):
         # Field-level sanity checks

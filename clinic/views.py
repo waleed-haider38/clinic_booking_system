@@ -8,6 +8,8 @@ from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError
 from django.db import transaction
 
+from .tasks import send_confirmation_email  , send_cancellation_email
+
 from .models import User, DoctorProfile, PatientProfile, Availability, Service, Appointment
 from .serializers import (
     UserSerializer, DoctorProfileSerializer, PatientProfileSerializer,
@@ -146,8 +148,6 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         end_time = serializer.validated_data['end_time']
 
         with transaction.atomic():
-            # lock the doctor row first — this is what makes the whole
-            # check-then-create sequence safe from race conditions
             DoctorProfile.objects.select_for_update().get(pk=doctor.pk)
 
             conflict = Appointment.objects.filter(
@@ -160,18 +160,21 @@ class AppointmentViewSet(viewsets.ModelViewSet):
                 raise ValidationError("This slot was just booked by someone else. Please pick another.")
 
             serializer.save(patient=patient_profile)
+            appointment = serializer.instance
+            transaction.on_commit(lambda: send_confirmation_email.delay(appointment.id))
 
     @action(detail=True, methods=['post'])
     def cancel(self , request , pk=None):
-        appoinment = self.get_object()
+        appointment = self.get_object()
         #finding current time
         current_time = timezone.now()
         #Checking appoinment cancelling time. It it is less than 2 hours appoinment will not be cancelled.
-        if appoinment.start_time - current_time < timedelta(hours=2):
+        if appointment.start_time - current_time < timedelta(hours=2):
             raise ValidationError("We cannot move forward with this request")
         #If appoinment already cancelled out then this error with gave up
         if appointment.status in ['cancelled', 'completed']:
             raise ValidationError("This appointment cannot be cancelled.")
-        appoinment.status = 'cancelled'
-        appoinment.save()
+        appointment.status = 'cancelled'
+        appointment.save()
+        transaction.on_commit(lambda: send_cancellation_email.delay(appointment.id))
         return Response({"status":"cancelled"})
