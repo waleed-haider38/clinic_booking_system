@@ -6,13 +6,13 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('clinic', '0005_appointment_exclude_overlapping_appointments'),
+        ("clinic", "0005_appointment_exclude_overlapping_appointments"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='appointment',
-            name='reminder_sent',
+            model_name="appointment",
+            name="reminder_sent",
             field=models.BooleanField(default=False),
         ),
     ]

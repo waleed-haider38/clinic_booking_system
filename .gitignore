@@ -1,5 +1,20 @@
+# Python
 venv/
-.env
 __pycache__/
 *.pyc
+
+# Environment
+.env
 db.sqlite3
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Celery
+celerybeat-schedule
+celerybeat-schedule.db
+
+# Editor (optional — agar VS Code use kar rahe hain)
+.vscode/
