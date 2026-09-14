@@ -23,7 +23,7 @@ reliable, conflict-free schedule to manage.
 - **Async tasks:** Celery + Redis (background email notifications, scheduled reminders)
 - **Testing:** pytest-django, coverage.py
 - **Code quality:** black, isort, flake8
-- **Planned (later phases):** Docker, GitHub Actions CI
+- **Containerization & CI:** Docker, Docker Compose, GitHub Actions
 
 ## User Roles
 
@@ -46,7 +46,6 @@ USER (id, email, password, role)
 ```
 
 **Design notes:**
-
 - `User` is a single source of truth for authentication (extends Django's
   `AbstractUser`, adds a `role` field). It never holds role-specific data.
 - `DoctorProfile` and `PatientProfile` are one-to-one extensions of `User`, holding
@@ -61,19 +60,19 @@ USER (id, email, password, role)
 
 Base URL: `/api/`
 
-| Endpoint                             | Method       | Access                                                                     |
-| ------------------------------------ | ------------ | -------------------------------------------------------------------------- |
-| `/api/token/`                        | POST         | Public — obtain JWT access/refresh tokens                                  |
-| `/api/token/refresh/`                | POST         | Public — refresh an access token                                           |
-| `/api/users/`                        | GET/POST/... | Admin only                                                                 |
-| `/api/doctors/`                      | GET/POST/... | Public read, doctor/admin write                                            |
-| `/api/doctors/{id}/available-slots/` | GET          | Public — returns open time slots for a doctor on a given date              |
-| `/api/patients/`                     | GET/POST/... | Authenticated, scoped to own profile                                       |
-| `/api/availabilities/`               | GET/POST/... | Public read, doctor-only write                                             |
-| `/api/services/`                     | GET/POST/... | Public read, doctor-only write                                             |
-| `/api/appointments/`                 | GET/POST/... | Authenticated, scoped to own bookings                                      |
-| `/api/appointments/{id}/cancel/`     | POST         | Authenticated — cancels an appointment, subject to the cancellation window |
-| `/api/docs/`                         | GET          | Swagger UI — interactive API docs                                          |
+| Endpoint | Method | Access |
+|---|---|---|
+| `/api/token/` | POST | Public — obtain JWT access/refresh tokens |
+| `/api/token/refresh/` | POST | Public — refresh an access token |
+| `/api/users/` | GET/POST/... | Admin only |
+| `/api/doctors/` | GET/POST/... | Public read, doctor/admin write |
+| `/api/doctors/{id}/available-slots/` | GET | Public — returns open time slots for a doctor on a given date |
+| `/api/patients/` | GET/POST/... | Authenticated, scoped to own profile |
+| `/api/availabilities/` | GET/POST/... | Public read, doctor-only write |
+| `/api/services/` | GET/POST/... | Public read, doctor-only write |
+| `/api/appointments/` | GET/POST/... | Authenticated, scoped to own bookings |
+| `/api/appointments/{id}/cancel/` | POST | Authenticated — cancels an appointment, subject to the cancellation window |
+| `/api/docs/` | GET | Swagger UI — interactive API docs |
 
 ### Background Notifications (Phase 5)
 
@@ -94,7 +93,6 @@ printed to the terminal running the Celery worker — no real mail server is req
 for development.
 
 **Key engineering decisions:**
-
 - Role-based permissions (`patient` / `doctor` / `admin`) enforced via custom DRF
   permission classes, not just serializer-level checks.
 - `get_queryset()` overrides scope list results per user (a patient never sees another
@@ -133,13 +131,11 @@ same doctor at the same time.
 
 **Additional business rules**, enforced in `Appointment.clean()` and the `cancel`
 action:
-
 - **Minimum notice period** — a new appointment must start at least 1 hour from now.
 - **Cancellation window** — an appointment can't be cancelled within 2 hours of its
   start time.
 
 **Proof it works — automated tests** (`clinic/tests.py`):
-
 - `NoticePeriodTest` — asserts booking within the minimum notice period raises a
   validation error.
 - `CancellationWindowTest` — asserts cancelling within the cancellation window is
@@ -155,14 +151,12 @@ under concurrent load, not just in the single-request happy path.
 ## Project Status
 
 ### ✅ Phase 1 — Planning & Data Modeling
-
 - Problem statement and user roles defined
 - ER diagram designed (6 entities: User, DoctorProfile, PatientProfile, Availability,
   Service, Appointment)
 - Django project + PostgreSQL connected via environment variables
 
 ### ✅ Phase 2 — Core Models & Admin
-
 - Custom `User` model with role field (`patient` / `doctor` / `admin`)
 - `DoctorProfile`, `PatientProfile`, `Availability`, `Service`, `Appointment` models
   built and migrated
@@ -170,7 +164,6 @@ under concurrent load, not just in the single-request happy path.
 - Basic double-booking validation implemented via `Appointment.clean()`
 
 ### ✅ Phase 3 — REST API
-
 - Serializers for all six models, with cross-field validation (e.g. `start_time` <
   `end_time`) and reuse of the model-level overlap check
 - Full CRUD via DRF `ModelViewSet`s, wired through a `DefaultRouter`
@@ -185,7 +178,6 @@ under concurrent load, not just in the single-request happy path.
 - Live Swagger/OpenAPI docs via `drf-spectacular` at `/api/docs/`
 
 ### ✅ Phase 4 — Concurrency & Booking Integrity
-
 - Reproduced the double-booking race condition and confirmed it with a failing test
   before fixing it
 - **Application-level fix:** `select_for_update()` + `transaction.atomic()` in
@@ -201,7 +193,6 @@ under concurrent load, not just in the single-request happy path.
 - See "How I Solved Double-Booking" above for the full write-up
 
 ### ✅ Phase 5 — Async Tasks: Notifications & Reminders
-
 - Configured Celery with Redis as the broker and result backend
   (`config/celery.py`, run via `celery -A config worker` and `celery -A config beat`)
 - Three background tasks added in `clinic/tasks.py`:
@@ -217,7 +208,6 @@ under concurrent load, not just in the single-request happy path.
   API produces the expected email output in the Celery worker's console
 
 ### ✅ Phase 6 — Testing & Code Quality
-
 - Migrated test running to `pytest` + `pytest-django` (existing `TestCase`-based
   tests required no changes to run under pytest)
 - Added `coverage.py` reporting; **86% overall test coverage**, exceeding the
@@ -237,22 +227,37 @@ under concurrent load, not just in the single-request happy path.
 - Updated `.gitignore` to exclude generated artifacts (`htmlcov/`, `.coverage`,
   `.pytest_cache/`, Celery Beat's local schedule file)
 
-### Upcoming
+### ✅ Phase 7 — Dockerize & CI
+- Added a `Dockerfile` containerizing the Django app (`python:3.13-slim` base,
+  cached dependency install layer, runs via `manage.py runserver` inside the
+  container)
+- Added `docker-compose.yml` wiring four services together on Docker's internal
+  network: `web` (Django), `db` (PostgreSQL 16), `redis`, and `celery` (worker),
+  using service names as hostnames (e.g. `DB_HOST=db`) instead of `localhost`
+- Verified the full stack — booking creation, cancellation, and async email
+  notifications — runs identically inside Docker via a single
+  `docker-compose up`, with no manual setup beyond providing a `.env` file
+- Added a GitHub Actions workflow (`.github/workflows/tests.yml`) that spins up
+  ephemeral PostgreSQL and Redis service containers and runs the full pytest
+  suite automatically on every push and pull request to `main`
+- **Scope note:** live deployment (Railway/Render) was evaluated but
+  intentionally left out of this stage due to free-tier card-verification
+  requirements on every provider tested. The project is fully runnable
+  anywhere with `docker-compose up`, which is documented below and demonstrated
+  in the project demo video (see Phase 8)
 
-- Phase 7: Docker + CI/CD + deployment
+### Upcoming
 - Phase 8: Final polish, documentation, and demo
 
 ## Local Setup
 
 1. Clone the repo and create a virtual environment:
-
    ```bash
    python3 -m venv venv
    source venv/bin/activate   # Windows: venv\Scripts\activate
    ```
 
 2. Install dependencies:
-
    ```bash
    pip install -r requirements.txt
    ```
@@ -261,19 +266,16 @@ under concurrent load, not just in the single-request happy path.
    variables — database name, user, password, host, port, and Django secret key).
 
 4. Create the PostgreSQL database:
-
    ```bash
    createdb clinic_db
    ```
 
 5. Run migrations:
-
    ```bash
    python manage.py migrate
    ```
 
 6. Create a superuser and run the server:
-
    ```bash
    python manage.py createsuperuser
    python manage.py runserver
@@ -282,15 +284,79 @@ under concurrent load, not just in the single-request happy path.
 7. Visit `http://127.0.0.1:8000/admin/` to manage data, or
    `http://127.0.0.1:8000/api/docs/` to explore and test the API.
 
+## Running with Docker (recommended)
+
+The entire stack (Django, PostgreSQL, Redis, and a Celery worker) runs with a
+single command — no local Python, PostgreSQL, or Redis installation needed:
+
+```bash
+docker-compose up --build
+```
+
+This starts:
+- **`web`** — the Django app at `http://localhost:8000/api/docs/`
+- **`db`** — PostgreSQL 16
+- **`redis`** — Redis (Celery's broker and result backend)
+- **`celery`** — a Celery worker processing background email tasks
+
+Environment variables are read from a `.env` file in the project root (see
+`.env.example`); the `db`/`redis` hostnames in `docker-compose.yml` are
+overridden automatically so containers can reach each other by service name.
+
+To also run the scheduled reminder task, start Celery Beat in a separate
+container/terminal:
+```bash
+docker-compose exec celery celery -A config beat --loglevel=info
+```
+
+## Continuous Integration
+
+Every push and pull request to `main` triggers a GitHub Actions workflow
+(`.github/workflows/tests.yml`) that runs the full `pytest` suite against
+fresh PostgreSQL and Redis containers — see the **Actions** tab on GitHub for
+run history and status.
+
 ## Running Tests
 
 ```bash
-python manage.py test clinic
+pytest
 ```
 
-This runs the full test suite, including the double-booking race-condition test,
+This runs the full test suite (including the double-booking race-condition test)
 against a temporary test database that is created and destroyed automatically — your
 real database is never touched.
+
+To check test coverage:
+```bash
+coverage run -m pytest
+coverage report        # summary in the terminal
+coverage html          # detailed line-by-line report in htmlcov/index.html
+```
+
+## Running Celery (background tasks)
+
+Async email notifications require Redis running (e.g. via Docker:
+`docker run -d -p 6379:6379 --name redis-clinic redis`), plus two additional
+processes alongside `manage.py runserver`:
+
+```bash
+# Terminal 1 — processes queued tasks (e.g. sending emails)
+celery -A config worker --loglevel=info --pool=solo   # --pool=solo needed on Windows
+
+# Terminal 2 — triggers the scheduled reminder task periodically
+celery -A config beat --loglevel=info
+```
+
+Emails are printed to the worker's terminal via Django's console email backend —
+no real SMTP server needed for local development.
+
+## Code Quality
+
+```bash
+isort clinic config      # sort and group imports
+black clinic config      # auto-format code style
+flake8 clinic config --max-line-length=100   # lint for unused imports, style issues
+```
 
 ## Environment Variables
 
